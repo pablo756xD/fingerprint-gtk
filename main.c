@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <gtk/gtk.h>
-#include </home/pablo/libfprint/libfprint/fprint.h>
+#include <libfprint/libfprint/fprint.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
