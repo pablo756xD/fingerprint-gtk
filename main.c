@@ -1,12 +1,13 @@
 #include <stdio.h>
 #include <gtk/gtk.h>
-#include <libfprint/libfprint/fprint.h>
+#include </home/pablo/libfprint/libfprint/fprint.h>
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
 
 typedef struct{
    struct fp_dev *dev;
+   struct fp_print_data *data;
    GtkWidget *parent_window;
 }callback_enroll;
 
@@ -74,8 +75,7 @@ GtkWidget *box;
 GtkWidget *box_v;
 GtkWidget *text_box_v;
 GtkWidget *start_button_v;
-
-struct fp_print_data *enrolled_print = NULL;
+GdkRGBA color;
 
 void new_enroll_window(){
   window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -106,14 +106,17 @@ void *enroll_finger_thread(void *data){
 	struct fp_print_data *enrolled_print = NULL;
 	int num = 0;
 	g_async_queue_push(message_queue, "You will to scan your finger 5 times...");
-
+  fp_dev_get_nr_enroll_stages(callback->dev);
 	while(num != FP_ENROLL_COMPLETE){
 	  struct fp_img *img = NULL;
+    gdk_rgba_parse(&color, "#ffffff");
+    gtk_widget_override_background_color(text_box, GTK_STATE_FLAG_NORMAL, &color);
 		g_async_queue_push(message_queue, "Scan your finger");
 		num = fp_enroll_finger_img(callback->dev, &enrolled_print, &img);
 		if(img){
       fp_img_save_to_file(img, "enroll.pgm");
 			g_async_queue_push(message_queue, "Fingerprint saved...");
+			g_idle_add((GSourceFunc)update_ui, NULL);
 			fp_img_free(img);
 		
 		}
@@ -128,12 +131,18 @@ void *enroll_finger_thread(void *data){
 			  gtk_button_set_label(GTK_BUTTON(start_button), "Finish");
 				g_signal_handlers_disconnect_by_func(start_button, G_CALLBACK(new_enroll_window), NULL);
 				g_signal_connect(start_button, "clicked", G_CALLBACK(gtk_main_quit), NULL);
+				callback->data = enrolled_print;
+				fp_print_data_save(callback->data, RIGHT_INDEX);
+				fp_print_data_free(callback->data);
 				return NULL;
 		  case FP_ENROLL_FAIL:
 			  g_async_queue_push(message_queue, "Enroll Failed...");
 				return NULL;
 		  case FP_ENROLL_PASS:
 			  g_async_queue_push(message_queue, "Enroll stage passed");
+				gdk_rgba_parse(&color, "#00ff00");
+				gtk_widget_override_background_color(text_box, GTK_STATE_FLAG_NORMAL,&color);
+				sleep(1);
 				break;
 		  case FP_ENROLL_RETRY:
 			  g_async_queue_push(message_queue, "Please try again");
@@ -147,13 +156,16 @@ void *enroll_finger_thread(void *data){
 		}
 	}
 	g_async_queue_push(message_queue, "Enroll sucess!");
+ // callback->_data = enrolled_print;
+	//fp_print_data_save(callback->_data, RIGHT_INDEX);
+	//fp_print_data_free(callback->_data);
 	return NULL;
 }
 
 void *verify_finger_thread(void *data){
  callback_verify *callback_v = (callback_verify*)data;
  int num;
-
+ fp_print_data_load(callback_v->dev, RIGHT_INDEX, &callback_v->data);
  while(1){
    struct fp_img *img;
 	 g_async_queue_push(message_queue, "Scan your finger");
@@ -171,7 +183,7 @@ void *verify_finger_thread(void *data){
      case FP_VERIFY_NO_MATCH:
 		   g_async_queue_push(message_queue, "NO MATCH");
 			 fp_print_data_free(callback_v->data);
-			 return NULL;
+			 break;
 	   case FP_VERIFY_MATCH:
 		   g_async_queue_push(message_queue, "MATCH");
 			 fp_print_data_free(callback_v->data);
@@ -210,20 +222,11 @@ gboolean update_v(void *user_data){
 }
 
 void start_enroll_process(GtkWidget *widget, void *data){
-	enrolled_print = NULL;
 	pthread_create(&enroll_thread, NULL, enroll_finger_thread, data);
 	g_timeout_add(100, update_ui,NULL);
 }
 
-static int num_v;
-
 void start_verify_process(GtkWidget *widget, void *data){
-  enrolled_print = NULL;
-  if(num_v != 0){
-    fprintf(stderr, "Failed to load fingerprint");
-		fprintf(stderr, "Run enroll first");
-		fp_dev_close(callback_v.dev);
-	}
 	pthread_create(&verify_thread, NULL, verify_finger_thread, data);
 	g_timeout_add(100, update_v, NULL);
 }
@@ -293,10 +296,11 @@ int main(int argc, char *argv[]){
 		gtk_main_quit();
 		fp_exit();
 	}
-	num_v = fp_print_data_load(dev, RIGHT_INDEX, &data);
+	
 
 	callback.parent_window = window;
 	callback.dev = dev;
+	callback.data = data;
 	callback_v.dev = dev;
 	callback_v.data = data;
   enroll_button = gtk_button_new_with_label("Enroll");
@@ -315,4 +319,3 @@ int main(int argc, char *argv[]){
 	gtk_main();
 	return 0;
 }
-
